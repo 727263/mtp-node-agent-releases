@@ -1,11 +1,14 @@
 ﻿#!/usr/bin/env bash
-# MTP Node Agent 涓€閿畨瑁咃紙Linux amd64锛夈€傝鐢?root 杩愯銆?#
-# 缃戠粶涓€閿紙鎺ㄨ崘锛?
-#   curl -fsSL https://github.com/727263/mtp-node-agent-releases/releases/latest/download/install.sh | bash
+# MTP Node Agent one-click installer (Linux amd64). Run as root.
 #
-# 鏈湴锛堜簩杩涘埗涓庤剼鏈悓鐩綍锛?
+# Network install (recommended):
+#   curl -fsSL https://raw.githubusercontent.com/727263/mtp-node-agent-releases/main/install.sh | bash
+#
+# Local (binary next to this script):
 #   sudo bash install.sh
 #   sudo FAKETLS_DOMAIN=cloudflare.com bash install.sh
+#
+# Env: FAKETLS_DOMAIN PUBLIC_IP LISTEN PREFIX SKIP_TZ=1 REPO_BIN RELEASES_REPO
 set -euo pipefail
 
 PREFIX="${PREFIX:-/opt/mtp-agent}"
@@ -22,34 +25,35 @@ warn() { echo "[WARN] $*" >&2; }
 error() { echo "[ERR ] $*" >&2; exit 1; }
 
 if [[ "$(id -u)" -ne 0 ]]; then
-  error "璇蜂娇鐢?root 杩愯"
+  error "Please run as root"
 fi
 
-# 瀹夎鍓嶇粺涓€涓婃捣鏃跺尯锛岄伩鍏嶆棩蹇?鍒版湡涓庡寳浜椂闂撮敊浣?set_timezone_shanghai() {
+# Set Asia/Shanghai so logs/expiry align with Beijing time
+set_timezone_shanghai() {
   local target="Asia/Shanghai"
   local current=""
   if [[ "${SKIP_TZ}" == "1" ]]; then
-    warn "宸茶缃?SKIP_TZ=1锛岃烦杩囨椂鍖?
+    warn "SKIP_TZ=1, skip timezone"
     return 0
   fi
   if command -v timedatectl >/dev/null 2>&1; then
     current="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
     if [[ "${current}" == "${target}" ]]; then
-      info "鏃跺尯宸叉槸 ${target}锛岃烦杩?
+      info "Timezone already ${target}"
       return 0
     fi
     if timedatectl set-timezone "${target}" 2>/dev/null; then
-      info "鏃跺尯宸茶涓?${target}"
+      info "Timezone set to ${target}"
       return 0
     fi
-    warn "timedatectl 璁剧疆鏃跺尯澶辫触锛屽皾璇曟墜鍔ㄥ啓鍏?.."
+    warn "timedatectl failed, trying /etc/localtime..."
   fi
   if [[ -f "/usr/share/zoneinfo/${target}" ]]; then
     ln -sf "/usr/share/zoneinfo/${target}" /etc/localtime
     echo "${target}" >/etc/timezone 2>/dev/null || true
-    info "鏃跺尯宸茶涓?${target}"
+    info "Timezone set to ${target}"
   else
-    warn "鏈壘鍒?zoneinfo/${target}锛岃烦杩囨椂鍖鸿缃?
+    warn "zoneinfo/${target} not found, skip timezone"
   fi
 }
 
@@ -88,13 +92,13 @@ pick_bin() {
 download_bin() {
   local url="https://github.com/${RELEASES_REPO}/releases/latest/download/mtp-agent-linux-amd64"
   TMP_BIN="$(mktemp /tmp/mtp-agent-XXXXXX)"
-  info "鏈満鏈壘鍒颁簩杩涘埗锛屾鍦ㄤ笅杞? ${url}"
+  info "Binary not found locally, downloading: ${url}"
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL -o "${TMP_BIN}" "${url}" || error "涓嬭浇澶辫触"
+    curl -fsSL -o "${TMP_BIN}" "${url}" || error "download failed"
   elif command -v wget >/dev/null 2>&1; then
-    wget -qO "${TMP_BIN}" "${url}" || error "涓嬭浇澶辫触"
+    wget -qO "${TMP_BIN}" "${url}" || error "download failed"
   else
-    error "闇€瑕?curl 鎴?wget"
+    error "curl or wget required"
   fi
   chmod +x "${TMP_BIN}"
   echo "${TMP_BIN}"
@@ -104,10 +108,9 @@ SRC_BIN="$(pick_bin || true)"
 if [[ -z "${SRC_BIN}" ]]; then
   SRC_BIN="$(download_bin)"
 fi
-info "浣跨敤浜岃繘鍒? ${SRC_BIN}"
+info "Using binary: ${SRC_BIN}"
 install -m 755 "${SRC_BIN}" "$PREFIX/bin/mtp-agent"
 
-# Ship VERSION next to install root (for /api/agent/info)
 if [[ -f "${SCRIPT_DIR}/VERSION" ]]; then
   install -m 644 "${SCRIPT_DIR}/VERSION" "$PREFIX/VERSION"
 elif [[ ! -f "$PREFIX/VERSION" ]]; then
@@ -135,17 +138,17 @@ port_max: 50000
 concurrency: 128
 EOF
   chmod 600 "$CFG"
-  echo "==== MTP Node Agent 宸插畨瑁?===="
-  echo "闈㈡澘: http://<IP>${LISTEN}/panel/  (鑻?listen 涓?:9100 鍒欑鍙?9100)"
-  echo "鐢ㄦ埛: admin"
-  echo "瀵嗙爜: ${PANEL_PASS}"
+  echo "==== MTP Node Agent installed ===="
+  echo "Panel: http://<IP>${LISTEN}/panel/  (port 9100 if listen is :9100)"
+  echo "User: admin"
+  echo "Pass: ${PANEL_PASS}"
   echo "API Token: ${API_TOKEN}"
   echo "FakeTLS: ${FAKETLS_DOMAIN}"
-  echo "鏃跺尯: Asia/Shanghai"
-  echo "閰嶇疆: ${CFG}"
-  echo "鍙敤 FAKETLS_DOMAIN=cloudflare.com 閲嶆柊瀹夎鍓嶆敼鍩熷悕锛堜粎鏂拌鍐欏叆锛涘凡鏈夐厤缃缂栬緫 config.yaml锛?
+  echo "Timezone: Asia/Shanghai"
+  echo "Config: ${CFG}"
+  echo "Override FakeTLS before first install: FAKETLS_DOMAIN=cloudflare.com bash install.sh"
 else
-  info "淇濈暀宸叉湁閰嶇疆: $CFG"
+  info "Keep existing config: $CFG"
 fi
 
 cat >/etc/systemd/system/${SERVICE_NAME}.service <<EOF
@@ -171,4 +174,4 @@ EOF
 systemctl daemon-reload
 systemctl enable --now "${SERVICE_NAME}"
 systemctl --no-pager --full status "${SERVICE_NAME}" || true
-echo "瀹屾垚銆?
+echo "Done."
