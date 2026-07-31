@@ -9,13 +9,19 @@
 安装示例（一键，自动设 Asia/Shanghai 时区并拉最新二进制）:
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/727263/mtp-node-agent-releases/main/install.sh | bash
+```
+
+或从 Release 资源下载（若已同步最新 install.sh）:
+
+```bash
 curl -fsSL https://github.com/727263/mtp-node-agent-releases/releases/latest/download/install.sh | bash
 ```
 
-或分步下载后再装:
+分步安装:
 
 ```bash
-curl -fsSL -o install.sh https://github.com/727263/mtp-node-agent-releases/releases/latest/download/install.sh
+curl -fsSL -o install.sh https://raw.githubusercontent.com/727263/mtp-node-agent-releases/main/install.sh
 curl -fsSL -o mtp-agent-linux-amd64 https://github.com/727263/mtp-node-agent-releases/releases/latest/download/mtp-agent-linux-amd64
 chmod +x install.sh mtp-agent-linux-amd64
 sudo bash install.sh
