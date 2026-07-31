@@ -1,5 +1,11 @@
-#!/usr/bin/env bash
-# MTP Node Agent installer (Linux). Run as root.
+﻿#!/usr/bin/env bash
+# MTP Node Agent 涓€閿畨瑁咃紙Linux amd64锛夈€傝鐢?root 杩愯銆?#
+# 缃戠粶涓€閿紙鎺ㄨ崘锛?
+#   curl -fsSL https://github.com/727263/mtp-node-agent-releases/releases/latest/download/install.sh | bash
+#
+# 鏈湴锛堜簩杩涘埗涓庤剼鏈悓鐩綍锛?
+#   sudo bash install.sh
+#   sudo FAKETLS_DOMAIN=cloudflare.com bash install.sh
 set -euo pipefail
 
 PREFIX="${PREFIX:-/opt/mtp-agent}"
@@ -7,16 +13,58 @@ SERVICE_NAME="${SERVICE_NAME:-mtp-agent}"
 LISTEN="${LISTEN:-:9100}"
 FAKETLS_DOMAIN="${FAKETLS_DOMAIN:-storage.googleapis.com}"
 PUBLIC_IP="${PUBLIC_IP:-}"
-REPO_BIN="${REPO_BIN:-}"  # optional path to prebuilt binary
+REPO_BIN="${REPO_BIN:-}"
+RELEASES_REPO="${RELEASES_REPO:-727263/mtp-node-agent-releases}"
+SKIP_TZ="${SKIP_TZ:-0}"
+
+info() { echo "[INFO] $*" >&2; }
+warn() { echo "[WARN] $*" >&2; }
+error() { echo "[ERR ] $*" >&2; exit 1; }
 
 if [[ "$(id -u)" -ne 0 ]]; then
-  echo "请使用 root 运行" >&2
-  exit 1
+  error "璇蜂娇鐢?root 杩愯"
 fi
+
+# 瀹夎鍓嶇粺涓€涓婃捣鏃跺尯锛岄伩鍏嶆棩蹇?鍒版湡涓庡寳浜椂闂撮敊浣?set_timezone_shanghai() {
+  local target="Asia/Shanghai"
+  local current=""
+  if [[ "${SKIP_TZ}" == "1" ]]; then
+    warn "宸茶缃?SKIP_TZ=1锛岃烦杩囨椂鍖?
+    return 0
+  fi
+  if command -v timedatectl >/dev/null 2>&1; then
+    current="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+    if [[ "${current}" == "${target}" ]]; then
+      info "鏃跺尯宸叉槸 ${target}锛岃烦杩?
+      return 0
+    fi
+    if timedatectl set-timezone "${target}" 2>/dev/null; then
+      info "鏃跺尯宸茶涓?${target}"
+      return 0
+    fi
+    warn "timedatectl 璁剧疆鏃跺尯澶辫触锛屽皾璇曟墜鍔ㄥ啓鍏?.."
+  fi
+  if [[ -f "/usr/share/zoneinfo/${target}" ]]; then
+    ln -sf "/usr/share/zoneinfo/${target}" /etc/localtime
+    echo "${target}" >/etc/timezone 2>/dev/null || true
+    info "鏃跺尯宸茶涓?${target}"
+  else
+    warn "鏈壘鍒?zoneinfo/${target}锛岃烦杩囨椂鍖鸿缃?
+  fi
+}
+
+set_timezone_shanghai
 
 mkdir -p "$PREFIX/bin" "$PREFIX/data"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)"
+TMP_BIN=""
+cleanup() {
+  if [[ -n "${TMP_BIN}" && -f "${TMP_BIN}" ]]; then
+    rm -f "${TMP_BIN}"
+  fi
+}
+trap cleanup EXIT
 
 pick_bin() {
   local c
@@ -37,21 +85,34 @@ pick_bin() {
   return 1
 }
 
+download_bin() {
+  local url="https://github.com/${RELEASES_REPO}/releases/latest/download/mtp-agent-linux-amd64"
+  TMP_BIN="$(mktemp /tmp/mtp-agent-XXXXXX)"
+  info "鏈満鏈壘鍒颁簩杩涘埗锛屾鍦ㄤ笅杞? ${url}"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL -o "${TMP_BIN}" "${url}" || error "涓嬭浇澶辫触"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "${TMP_BIN}" "${url}" || error "涓嬭浇澶辫触"
+  else
+    error "闇€瑕?curl 鎴?wget"
+  fi
+  chmod +x "${TMP_BIN}"
+  echo "${TMP_BIN}"
+}
+
 SRC_BIN="$(pick_bin || true)"
 if [[ -z "${SRC_BIN}" ]]; then
-  echo "未找到二进制。请把 mtp-agent-linux-amd64 和 install.sh 放同一目录，或:" >&2
-  echo "  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o mtp-agent ./cmd/agent" >&2
-  echo "  REPO_BIN=/path/to/mtp-agent-linux-amd64 bash install.sh" >&2
-  exit 1
+  SRC_BIN="$(download_bin)"
 fi
-echo "使用二进制: ${SRC_BIN}"
+info "浣跨敤浜岃繘鍒? ${SRC_BIN}"
 install -m 755 "${SRC_BIN}" "$PREFIX/bin/mtp-agent"
 
 # Ship VERSION next to install root (for /api/agent/info)
 if [[ -f "${SCRIPT_DIR}/VERSION" ]]; then
   install -m 644 "${SCRIPT_DIR}/VERSION" "$PREFIX/VERSION"
 elif [[ ! -f "$PREFIX/VERSION" ]]; then
-  echo "0.2.0" >"$PREFIX/VERSION"
+  VER="$(curl -fsSL "https://raw.githubusercontent.com/${RELEASES_REPO}/main/VERSION" 2>/dev/null || true)"
+  echo "${VER:-0.2.4}" >"$PREFIX/VERSION"
 fi
 
 CFG="$PREFIX/config.yaml"
@@ -74,16 +135,17 @@ port_max: 50000
 concurrency: 128
 EOF
   chmod 600 "$CFG"
-  echo "==== MTP Node Agent 已安装 ===="
-  echo "面板: http://<IP>${LISTEN}/panel/  (若 listen 为 :9100 则端口 9100)"
-  echo "用户: admin"
-  echo "密码: ${PANEL_PASS}"
+  echo "==== MTP Node Agent 宸插畨瑁?===="
+  echo "闈㈡澘: http://<IP>${LISTEN}/panel/  (鑻?listen 涓?:9100 鍒欑鍙?9100)"
+  echo "鐢ㄦ埛: admin"
+  echo "瀵嗙爜: ${PANEL_PASS}"
   echo "API Token: ${API_TOKEN}"
   echo "FakeTLS: ${FAKETLS_DOMAIN}"
-  echo "配置: ${CFG}"
-  echo "可用 FAKETLS_DOMAIN=cloudflare.com 重新安装前改域名（仅新装写入；已有配置请编辑 config.yaml）"
+  echo "鏃跺尯: Asia/Shanghai"
+  echo "閰嶇疆: ${CFG}"
+  echo "鍙敤 FAKETLS_DOMAIN=cloudflare.com 閲嶆柊瀹夎鍓嶆敼鍩熷悕锛堜粎鏂拌鍐欏叆锛涘凡鏈夐厤缃缂栬緫 config.yaml锛?
 else
-  echo "保留已有配置: $CFG"
+  info "淇濈暀宸叉湁閰嶇疆: $CFG"
 fi
 
 cat >/etc/systemd/system/${SERVICE_NAME}.service <<EOF
@@ -95,6 +157,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=${PREFIX}
+Environment=TZ=Asia/Shanghai
 ExecStart=${PREFIX}/bin/mtp-agent -config ${CFG}
 Restart=always
 RestartSec=3
@@ -108,4 +171,4 @@ EOF
 systemctl daemon-reload
 systemctl enable --now "${SERVICE_NAME}"
 systemctl --no-pager --full status "${SERVICE_NAME}" || true
-echo "完成。"
+echo "瀹屾垚銆?
