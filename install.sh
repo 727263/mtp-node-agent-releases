@@ -113,9 +113,9 @@ install -m 755 "${SRC_BIN}" "$PREFIX/bin/mtp-agent"
 
 if [[ -f "${SCRIPT_DIR}/VERSION" ]]; then
   install -m 644 "${SCRIPT_DIR}/VERSION" "$PREFIX/VERSION"
-elif [[ ! -f "$PREFIX/VERSION" ]]; then
+else
   VER="$(curl -fsSL "https://raw.githubusercontent.com/${RELEASES_REPO}/main/VERSION" 2>/dev/null || true)"
-  echo "${VER:-0.2.4}" >"$PREFIX/VERSION"
+  echo "${VER:-0.2.5}" >"$PREFIX/VERSION"
 fi
 
 CFG="$PREFIX/config.yaml"
@@ -135,7 +135,8 @@ faketls_domain: "${FAKETLS_DOMAIN}"
 data_dir: "${PREFIX}/data"
 port_min: 20000
 port_max: 50000
-concurrency: 128
+concurrency: 4096
+tolerate_skew_sec: 30
 EOF
   chmod 600 "$CFG"
   echo "==== MTP Node Agent installed ===="
@@ -149,6 +150,19 @@ EOF
   echo "Override FakeTLS before first install: FAKETLS_DOMAIN=cloudflare.com bash install.sh"
 else
   info "Keep existing config: $CFG"
+  # Soft-upgrade reconnect-related defaults without clobbering other settings.
+  if ! grep -qE '^tolerate_skew_sec:' "$CFG"; then
+    echo "tolerate_skew_sec: 30" >>"$CFG"
+    info "Added tolerate_skew_sec: 30"
+  fi
+  if grep -qE '^concurrency:[[:space:]]*(0|128)[[:space:]]*$' "$CFG"; then
+    sed -i.bak -E 's/^concurrency:[[:space:]]*(0|128)[[:space:]]*$/concurrency: 4096/' "$CFG"
+    rm -f "${CFG}.bak"
+    info "Updated concurrency 128/0 → 4096"
+  elif ! grep -qE '^concurrency:' "$CFG"; then
+    echo "concurrency: 4096" >>"$CFG"
+    info "Added concurrency: 4096"
+  fi
 fi
 
 cat >/etc/systemd/system/${SERVICE_NAME}.service <<EOF
