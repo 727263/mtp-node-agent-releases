@@ -178,7 +178,7 @@ fi
 
 PANEL_PORT="$(panel_port_from_listen)"
 
-# Resolve IPs: explicit CLI > existing config > auto-detect
+# Resolve public IP: explicit CLI > auto-detect (panel_allow_ip is NOT set at install; use panel Settings)
 if [[ -z "${_EXPLICIT_PUBLIC_IP}" ]]; then
   PUBLIC_IP="$(detect_public_ip)"
 else
@@ -188,7 +188,7 @@ fi
 if [[ -n "${_EXPLICIT_PANEL_ALLOW_IP}" ]]; then
   PANEL_ALLOW_IP="${_EXPLICIT_PANEL_ALLOW_IP}"
 else
-  PANEL_ALLOW_IP="$(detect_ssh_client_ip)"
+  PANEL_ALLOW_IP=""
 fi
 
 CFG="$PREFIX/config.yaml"
@@ -243,20 +243,15 @@ else
     fi
   fi
 
-  # panel_allow_ip: CLI overrides; else fill if empty; else keep
+  # panel_allow_ip: only explicit CLI overrides; otherwise keep existing or leave empty
   if [[ -n "${_EXPLICIT_PANEL_ALLOW_IP}" ]]; then
     yaml_set "$CFG" "panel_allow_ip" "${_EXPLICIT_PANEL_ALLOW_IP}"
     PANEL_ALLOW_IP="${_EXPLICIT_PANEL_ALLOW_IP}"
   else
     cur="$(yaml_get "$CFG" "panel_allow_ip")"
-    if [[ -z "${cur}" ]]; then
-      if [[ -n "${PANEL_ALLOW_IP}" ]]; then
-        yaml_set "$CFG" "panel_allow_ip" "${PANEL_ALLOW_IP}"
-      elif ! grep -qE '^panel_allow_ip:' "$CFG"; then
-        echo "panel_allow_ip: \"\"" >>"$CFG"
-      fi
-    else
-      PANEL_ALLOW_IP="${cur}"
+    PANEL_ALLOW_IP="${cur}"
+    if ! grep -qE '^panel_allow_ip:' "$CFG"; then
+      echo "panel_allow_ip: \"\"" >>"$CFG"
     fi
   fi
 
@@ -274,8 +269,7 @@ fi
 if [[ -n "${PANEL_ALLOW_IP}" ]]; then
   info "Panel/API allow IPs: ${PANEL_ALLOW_IP}"
 else
-  warn "PANEL_ALLOW_IP empty — panel will not filter by source IP"
-  warn "Set with: PANEL_ALLOW_IP=your.ip,bot.ip bash install.sh"
+  info "Panel/API IP filter: off (set panel_allow_ip in panel Settings after login)"
 fi
 
 # systemd + resource limits
@@ -447,10 +441,11 @@ else
   echo "Panel: http://${SHOW_IP}:${PANEL_PORT}/panel/"
 fi
 echo "Public IP: ${SHOW_IP}"
-echo "Panel allow IP: ${PANEL_ALLOW_IP:-'(unrestricted)'}"
+echo "Panel allow IP: ${PANEL_ALLOW_IP:-'(none — configure in panel Settings)'}"
 echo "FakeTLS: ${FAKETLS_DOMAIN}"
 echo "MTP ports: ${PORT_MIN}-${PORT_MAX}"
 echo "Limits: NOFILE=${AGENT_NOFILE} MEM%=${AGENT_MEM_PERCENT}"
 echo "Config: ${CFG}"
-echo "Panel IP: PANEL_ALLOW_IP=1.2.3.4,5.6.7.8 bash install.sh"
+echo "Optional CLI: PANEL_ALLOW_IP=1.2.3.4 bash install.sh"
+echo "Locked out? SSH in, set panel_allow_ip: \"\" in ${CFG}, restart ${SERVICE_NAME}"
 echo "Done."
