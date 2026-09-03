@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # MTP Node Agent one-click installer (Linux amd64). Run as root.
 #
 # Network install (recommended):
@@ -38,6 +38,37 @@ PORT_MAX="${PORT_MAX:-50000}"
 info() { echo "[INFO] $*" >&2; }
 warn() { echo "[WARN] $*" >&2; }
 error() { echo "[ERR ] $*" >&2; exit 1; }
+
+systemctl_ok() {
+  local n=0
+  while [[ "$n" -lt 3 ]]; do
+    if systemctl "$@" 2>/dev/null; then
+      return 0
+    fi
+    n=$((n + 1))
+    if [[ "$n" -lt 3 ]]; then
+      warn "systemctl $* failed; retry ${n}/3..."
+      sleep 2
+    fi
+  done
+  return 1
+}
+
+start_service() {
+  if systemctl_ok daemon-reload && systemctl_ok enable --now "${SERVICE_NAME}"; then
+    return 0
+  fi
+  warn "systemd/dbus issue on this host; restarting dbus..."
+  systemctl restart dbus 2>/dev/null || true
+  sleep 2
+  if systemctl_ok daemon-reload && systemctl_ok enable --now "${SERVICE_NAME}"; then
+    return 0
+  fi
+  warn "Could not start via systemd. Run manually:"
+  warn "  systemctl daemon-reload && systemctl enable --now ${SERVICE_NAME}"
+  warn "  or: ${PREFIX}/bin/mtp-agent -config ${CFG}"
+  return 1
+}
 
 if [[ "$(id -u)" -ne 0 ]]; then
   error "Please run as root"
@@ -424,9 +455,8 @@ open_firewall() {
 
 open_firewall
 
-systemctl daemon-reload
-systemctl enable --now "${SERVICE_NAME}"
-systemctl --no-pager --full status "${SERVICE_NAME}" || true
+start_service || true
+systemctl --no-pager --full status "${SERVICE_NAME}" 2>/dev/null || true
 
 SHOW_IP="${PUBLIC_IP:-YOUR_IP}"
 echo
